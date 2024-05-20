@@ -8,7 +8,6 @@ import requests
 import dateutil.parser
 from urllib.parse import quote
 
-API = 'http://localhost:1325'
 #signal_file_lock=threading.Lock()
 clash_op_lock=threading.Lock()
 usage_dic_lock=threading.Lock()
@@ -17,7 +16,7 @@ signal_lock=threading.Lock()
 
 class Proxying_by_Clash:
     def __init__(self,limit='all'):
-        self.API='http://localhost:28066'
+        self.renew_api()
         self.limit=limit
         #supported limit modes:
             #'all': no limit
@@ -42,12 +41,30 @@ class Proxying_by_Clash:
         #  2 : thread pausing signal(don't change node)
 
     def get_proxies(self):
-        return requests.get(f'{API}/proxies').json()
+        return requests.get(f'{self.api}/proxies').json()
+
+    def ip_information(self):
+        response = requests.get('http://ip-api.com/json/')
+        return response.json()
+    def renew_api(self):
+        with open(r'C:\Users\minran.DESKTOP-UOFUVTU\.config\clash\config.yaml','r') as f:
+            a=f.read()
+        a=a.split('\n')
+        sign=0
+        for i in a:
+            if 'external-controller' in i:
+                print('Initializing clash port number successfully:',i.split(':')[-1])
+                self.api='http://localhost:'+i.split(':')[-1]
+                sign=1
+                break
+        if not sign:
+            print('Failed to renew clash api port number!\nUsing default...')
+            self.api='http://localhost:9090'
 
     def change_proxy(self,group, new_proxy):
         data = {'name': new_proxy}
         try:
-            requests.put(f'{API}/proxies/{group}', json=data)
+            requests.put(f'{self.api}/proxies/{group}', json=data)
             self.current_node=new_proxy
         except:
             print('节点切换失败！（'+self.current_node+'->'+new_proxy+'）')
@@ -151,7 +168,7 @@ class Proxying_by_Clash:
         return filtered
 
     def change_one_by_use(self,strategy='average focus',limit=0):
-        global usage_dic
+        global usage_dic,rest_time
         if not limit:
             limit=self.limit
         nodes=self.filter_limit(limit)
@@ -162,12 +179,12 @@ class Proxying_by_Clash:
             for j in range(len(delays)):
                 delays[j]['time']=dateutil.parser.isoparse(delays[j]['time'])
             delays.sort(key=lambda x:x['time'])
-            if delays[-1]['delay']!=0:
+            if delays and delays[-1]['delay']!=0:
                 usage=usage_dic.get(nodes[i],[])
                 t=time.time()
                 usage_in_1min=[]
                 for j in usage:
-                    if t-j<30:
+                    if t-j<rest_time:
                         usage_in_1min.append(j)
                 with usage_dic_lock:
                     usage_dic[nodes[i]]=usage_in_1min
@@ -191,16 +208,14 @@ class Proxying_by_Clash:
             else:
                 self.change_proxy('GLOBAL', availables[index2][0])
         if strategy=='rest 1 minute':
-            global pointer
+            global pointer,press_rate
             try:
                 pointer
             except:
-                pointer=[availables[_][0] for _ in range(int(0.3*len(availables))+1)]
+                pointer=[availables[_][0] for _ in range(int(press_rate*len(availables))+1)]
                 self.change_proxy('GLOBAL',pointer[0])
                 return
-            #print(pointer)
             if availables[0][2]==0:
-                #print('md')
                 for i in range(len(availables)-1,-1,-1):
                     if availables[i][0] in pointer:
                         pointer.remove(availables[i][0])
@@ -208,14 +223,17 @@ class Proxying_by_Clash:
                 pointer.append(availables[0][0])
                 self.change_proxy('GLOBAL',availables[0][0])
             else:
-                #print(availables[0][0],availables[0][2])
-                #print(pointer)
-                for i in range(len(availables)):
-                    #print(availables)
-                    if availables[i][0] in pointer:
-                        self.change_proxy('GLOBAL',availables[i][0])
-                        break
-
+                ma=0
+                with usage_dic_lock:
+                    t=time.time()
+                    for i in pointer:
+                        if not usage_dic[i]:
+                            self.change_proxy('GLOBAL',i)
+                            return
+                        if t-usage_dic[i][-1]>ma:
+                            ma=t-usage_dic[i][-1]
+                            least_recently_used_node=i
+                self.change_proxy('GLOBAL',least_recently_used_node)
 
     def limited_fastest(self,limit=0):
         if not limit:
@@ -232,26 +250,6 @@ class Proxying_by_Clash:
 global usage_dic
 usage_dic={}
 clash=Proxying_by_Clash()
-
-
-# def push_change(path,change):#format of change:[(index,content,time),...]
-#     with signal_file_lock:
-#         with open(path,'r') as f:
-#             a=f.read()
-#     a=eval(a)
-#     book=a[0]
-#     num=a[1]
-#     for i in change:
-#         if i[0]==-1:
-#             #print('md')
-#             num+=i[1]
-#         else:
-#             if i[2]>=book[i[0]][1]:
-#                 book[i[0]][1]=i[2]
-#                 book[i[0]][0]=i[1]
-#     with signal_file_lock:
-#         with open(path,'w') as f:
-#             f.write(str([book,num]))
 
 def get_raw(url,index,unicode,vary_node,limit=0,strategy='average focus'):
     path='crawl control\\'+str(unicode)
@@ -274,19 +272,19 @@ def get_raw(url,index,unicode,vary_node,limit=0,strategy='average focus'):
         content=urllib.request.urlopen(req).read()
     except:
         with print_lock:
-            print(index,'failed!',url, current_node)
+            try:
+                print(index,'failed!',url, current_node)
+            except:
+                print(index, 'failed!', url)
         with signal_lock:
             try:
                 book[index]=0
                 cur_thread_num-=1
             except:
                 pass
-        #push_change(path+'\\'+'exchanged signals.txt',[(-1,-1,0)])
         return
-    t=time.time()
     with open(path+'\\'+str(index)+'.txt','wb') as f:
         f.write(content)
-    #push_change(path+'\\'+'exchanged signals.txt',[(index,1,t),(-1,-1,t)])
     with signal_lock:
         try:
             book[index]=1
@@ -297,20 +295,26 @@ def get_raw(url,index,unicode,vary_node,limit=0,strategy='average focus'):
         print(index,'successful!')
 
 def virtualize_usage(limit):
+    global press_rate,rest_time
     prox=clash.filter_limit(limit)
     #print(prox)
     proxies=clash.get_proxies()['proxies']
     able=[]
     for i in prox:
-        if proxies[i]['history'][-1]['delay']!=0:
+        if proxies[i]['history'] and proxies[i]['history'][-1]['delay']!=0:
             able.append(i)
-    gap=60/len(able)
+    gap=rest_time/len(able)
     t=time.time()
-    for i in range(int(len(able)/2)):
-        usage_dic[able[i]]=[t-int(gap*i)]
+    for i in range(int((1-press_rate)*len(able))-1):
+        usage_dic[able[i]]=[t-gap*i]
+
+global press_rate,rest_time
+press_rate=0.3
+rest_time=30
 
 def multicrawl(url_list,node_usage='constant',strategy='average focus',limit=0,max_thread=20):
     path='crawl control'
+    vusign=1
     if not os.path.exists(path):
         os.makedirs(path)
     if not os.path.exists(path+'\\'+'last unique code.txt'):
@@ -355,8 +359,9 @@ def multicrawl(url_list,node_usage='constant',strategy='average focus',limit=0,m
             with signal_lock:
                 cur_thread_num+=1
             if node_usage=='vary node':
-                if strategy=='rest 1 minute':
+                if strategy=='rest 1 minute' and vusign:
                     virtualize_usage(limit)
+                    vusign=0
                 thread=threading.Thread(target=get_raw,args=(url_list[k],k,unique_code,1,limit,strategy))
             else:
                 thread=threading.Thread(target=get_raw,args=(url_list[k],k,unique_code,0,limit,strategy))
@@ -365,23 +370,3 @@ def multicrawl(url_list,node_usage='constant',strategy='average focus',limit=0,m
     for i in threads:
         i.join()
     return unique_code
-
-
-
-
-# # clash=Proxying_by_Clash()
-# proxies = clash.get_proxies()
-# # print(proxies)
-# prox=proxies['proxies']
-# names=prox['GLOBAL']['all']
-# #print(prox['香港02'])
-# a=[]
-# for i in names:
-#     history=prox[i]['history']
-#     print(i)
-#     for j in history:
-#         a.append(dateutil.parser.isoparse(j['time']))
-#         print('    ',j,dateutil.parser.isoparse(j['time']))
-#
-# a.sort()
-# print(a)
