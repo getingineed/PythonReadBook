@@ -3,10 +3,17 @@ import time
 import urllib.request
 import re
 import os
+from datetime import datetime
 import random
 import requests
 import dateutil.parser
 from urllib.parse import quote
+from urllib.parse import urlparse
+
+def extract_domain(url):
+    parsed_url = urlparse(url)
+    domain = '{uri.netloc}'.format(uri=parsed_url)
+    return domain
 
 #signal_file_lock=threading.Lock()
 clash_op_lock=threading.Lock()
@@ -40,6 +47,34 @@ class Proxying_by_Clash:
         # -1 : thread terminating signal
         #  2 : thread pausing signal(don't change node)
 
+        #load and update node dic
+        try:
+            with open('node dic.txt','r',encoding='utf-8') as f:
+                self.node_dic=eval(f.read())
+        except:
+            self.node_dic={}
+        if time.time()-self.node_dic.get('last renew',0)>3600*24:
+            print('have not renewed node information for over 1 day, renewing node information...')
+            self.update_node_dic()
+        else:
+            print('Node information last renewed:',datetime.fromtimestamp(self.node_dic['last renew']).strftime('%Y-%m-%d %H:%M:%S'))
+
+    def update_node_dic(self):
+        proxy_names=self.get_proxies()['proxies']['GLOBAL']['all']
+        for i in proxy_names:
+            if not i in self.node_dic.keys():
+                self.change_proxy('GLOBAL',i)
+                try:
+                    self.node_dic[i]=self.ip_information()
+                except:
+                    pass
+        t=time.time()
+        self.node_dic['last renew']=t
+        with open('node dic.txt','w',encoding='utf-8') as f:
+            f.write(str(self.node_dic))
+        print('Node information renewed!')
+
+
     def get_proxies(self):
         return requests.get(f'{self.api}/proxies').json()
 
@@ -69,12 +104,12 @@ class Proxying_by_Clash:
         except:
             print('节点切换失败！（'+self.current_node+'->'+new_proxy+'）')
 
-    def filter_limit(self,limit=0):
+    def filter_limit(self,limit=0,allow_query=0):
         if not limit:
             limit='all'
         ins=['DIRECT','CN-上海游戏节点','CN-浙江BGP','CN-安徽联通','CN-河南移动','CN-江苏BGP','CN-宿迁BGP','CN-浙江BGP(443端口)',
              'CN-江苏BGP(443端口)','CN-宿迁BGP(443端口)','CN-安徽联通(443端口)','CN-河南移动(443端口)','CN-安徽 500m','CN-河南1G']
-        exs=['TW 1G 家宽/Netflix','TW 1G(443端口) 家宽/Netflix','HK 5G','HK 5G(443端口)','JP 5G','GER Frankfurt 5G',
+        exs=['TW 1G 家宽/Netflix','TW 1G(443端口) 家宽/Netflix','HK 5G','HK 5G(443端口)','SG 5G','JP 5G','GER Frankfurt 5G',
              '广日隧道-春川 5x', '广港隧道-香港 A 5x', '广港隧道-香港 B 5x', '广港隧道-台湾 5x', '广新隧道-新加坡 5x',
              '广港隧道-孟买 5x', '广日隧道-首尔 5x', '辽日隧道-墨西哥 5x', '辽德隧道-法兰克福 5x', '辽德隧道-迪拜 5x',
              '辽德隧道-英国 5x', '辽日隧道-美国阿什本 5x', '辽日隧道-美国芝加哥 5x','Singapore4G/Netflix', 'JP500m/Netflix',
@@ -98,7 +133,7 @@ class Proxying_by_Clash:
              'MX.墨西哥.A | 中转', 'MX.墨西哥.X | 专线', 'NL.荷兰.X | 专线', 'SA.沙特.A | 中转', 'SA.沙特.X | 专线',
              'UAE.迪拜.A | 中转', 'UAE.迪拜.Z | 专线', 'ZA.南非.A | 中转', 'RU.俄罗斯.A | 中转', 'TR.土耳其.A | 中转']
         ass=['TW 1G 家宽/Netflix','TW 1G(443端口) 家宽/Netflix','HK 5G','HK 5G(443端口)','JP 5G','广日隧道-春川 5x',
-             '广港隧道-香港 A 5x', '广港隧道-香港 B 5x', '广港隧道-台湾 5x', '广新隧道-新加坡 5x', '广港隧道-孟买 5x',
+             '广港隧道-香港 A 5x', '广港隧道-香港 B 5x', '广港隧道-台湾 5x', '广新隧道-新加坡 5x','SG 5G','广港隧道-孟买 5x',
              '广日隧道-首尔 5x','Singapore4G/Netflix', 'JP500m/Netflix','Korea 500m/Netflix','Korea Chunchuan 4G/Netflix',
              'Korea Seoul  4G/Netflix', 'Mumbai 4G/Netflix','日本1 [3×]', '日本2 [3×]', '韩国1 [3×]', '韩国2 [3×]', '香港01',
              '香港02', '新加坡2 [3×]', '香港03', '香港04 [2×]', '香港05  [3×]', '新加坡1 [3×]','IN1|0.1|导航|https://new.dc.cyou',
@@ -251,9 +286,13 @@ global usage_dic
 usage_dic={}
 clash=Proxying_by_Clash()
 
-def get_raw(url,index,unicode,vary_node,limit=0,strategy='average focus'):
+def get_raw(url,index,unicode,vary_node,limit=0,strategy='average focus',write_name='.txt',instant_return=0):
     path='crawl control\\'+str(unicode)
-    headers={'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36 Edg/114.0.1823.79'}
+    domain=extract_domain(url)
+    path1=url.replace('https://','').replace('http://','').replace(domain+'/','')
+    headers = {
+        'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Mobile Safari/537.36'
+    }
     encoded_url = quote(url, safe="/:")
     global book,cur_thread_num
     if vary_node:
@@ -282,8 +321,10 @@ def get_raw(url,index,unicode,vary_node,limit=0,strategy='average focus'):
                 cur_thread_num-=1
             except:
                 pass
-        return
-    with open(path+'\\'+str(index)+'.txt','wb') as f:
+        return ''
+    if instant_return:
+        return content
+    with open(path+'\\'+str(index)+write_name,'wb') as f:
         f.write(content)
     with signal_lock:
         try:
@@ -297,7 +338,6 @@ def get_raw(url,index,unicode,vary_node,limit=0,strategy='average focus'):
 def virtualize_usage(limit):
     global press_rate,rest_time
     prox=clash.filter_limit(limit)
-    #print(prox)
     proxies=clash.get_proxies()['proxies']
     able=[]
     for i in prox:
@@ -312,7 +352,7 @@ global press_rate,rest_time
 press_rate=0.3
 rest_time=30
 
-def multicrawl(url_list,node_usage='constant',strategy='average focus',limit=0,max_thread=20):
+def multicrawl(url_list,node_usage='constant',strategy='average focus',limit=0,max_thread=20,write_name='.txt'):
     path='crawl control'
     vusign=1
     if not os.path.exists(path):
@@ -329,7 +369,6 @@ def multicrawl(url_list,node_usage='constant',strategy='average focus',limit=0,m
     cur_path=path+'\\'+str(unique_code)
     os.makedirs(cur_path)
 
-    t=time.time()
     global book
     global cur_thread_num
     book=[0 for _ in url_list]
@@ -362,11 +401,12 @@ def multicrawl(url_list,node_usage='constant',strategy='average focus',limit=0,m
                 if strategy=='rest 1 minute' and vusign:
                     virtualize_usage(limit)
                     vusign=0
-                thread=threading.Thread(target=get_raw,args=(url_list[k],k,unique_code,1,limit,strategy))
+                thread=threading.Thread(target=get_raw,args=(url_list[k],k,unique_code,1,limit,strategy,write_name))
             else:
-                thread=threading.Thread(target=get_raw,args=(url_list[k],k,unique_code,0,limit,strategy))
+                thread=threading.Thread(target=get_raw,args=(url_list[k],k,unique_code,0,limit,strategy,write_name))
             threads.append(thread)
             thread.start()
     for i in threads:
         i.join()
     return unique_code
+

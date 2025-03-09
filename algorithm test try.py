@@ -69,8 +69,8 @@ def virt():
 
 global ipnum,askdelay,resttime,pressrate,threadnum,usage,tot,curnum
 
-ipnum=30
-askdelay=3
+ipnum=80
+askdelay=1
 resttime=30
 pressrate=0.3
 threadnum=30

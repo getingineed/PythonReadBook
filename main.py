@@ -5,10 +5,15 @@ import subprocess
 import pygame
 from tkinter import scrolledtext
 from gtts import gTTS
+from tkinter import filedialog
+from tkinter import messagebox
+from tkinter import simpledialog
+from datetime import datetime
 import shutil
 import re
 import os
 import math
+import json
 import pickle
 import pyttsx3
 import threading
@@ -139,35 +144,213 @@ class FindStrAPP:#1*init,7*functional def
             self.look_first.pack(side=tk.BOTTOM, fill=tk.X)
 
 
-class BookSelectionWindow:#1*init,3*functional def
-    def __init__(self,path):
-        self.root = tk.Tk()
-        self.root.title("选择书籍")
-        self.books_directory = path+r'\books'
-        self.scrollbar = tk.Scrollbar(self.root)
-        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.book_listbox = tk.Listbox(self.root, yscrollcommand=self.scrollbar.set, font=("Arial", 20))
-        self.book_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.scrollbar.config(command=self.book_listbox.yview)
-        self.load_books()
+# class BookSelectionWindow:#1*init,3*functional def
+#     def __init__(self,path):
+#         self.root = tk.Tk()
+#         self.root.title("选择书籍")
+#         self.books_directory = path+r'\books'
+#         self.scrollbar = tk.Scrollbar(self.root)
+#         self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+#         self.book_listbox = tk.Listbox(self.root, yscrollcommand=self.scrollbar.set, font=("Arial", 20))
+#         self.book_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+#         self.scrollbar.config(command=self.book_listbox.yview)
+#         self.load_books()
+#
+#     def run(self):
+#         self.root.mainloop()
+#
+#     def load_books(self):
+#         for file_name in os.listdir(self.books_directory):
+#             if file_name.lower().endswith(".txt"):
+#                 book_name = file_name[:-4]
+#                 self.book_listbox.insert(tk.END, book_name)
+#         self.book_listbox.bind("<Double-Button-1>", self.open_selected_book)
+#
+#     def open_selected_book(self,event):
+#         selected_book_index=self.book_listbox.curselection()
+#         if selected_book_index:
+#             selected_book_name=self.book_listbox.get(selected_book_index)
+#             read_app=ReaderApp(selected_book_name,path)
+#             read_app.root.protocol("WM_DELETE_WINDOW",read_app.on_closing)
+#             read_app.run()
 
-    def run(self):
+class FolderSelect:
+    def __init__(self, root_path):
+        self.root_path = os.path.normpath(root_path+'\\books')
+        self.backup_dir = os.path.join(path, 'backup')
+        self.data_dir = os.path.join(self.backup_dir, 'data')
+        self.record_file = os.path.join(self.backup_dir, 'records.txt')
+        if not os.path.exists(self.backup_dir):
+            os.makedirs(self.backup_dir)
+            os.makedirs(self.data_dir)
+        else:
+            if not os.path.exists(self.data_dir):
+                os.makedirs(self.data_dir)
+        self.deleted_items=self.load_records()
+        self.setup_ui()
+
+    def setup_ui(self):
+        self.root = tk.Tk()
+        self.root.title(f'Book Menu: {self.root_path}')
+        self.listbox = tk.Listbox(self.root, width=50, height=20)
+        self.listbox.pack(padx=10, pady=10)
+        self.update_directory(self.root_path)
+        self.listbox.bind('<Button-1>', self.handle_single_click)
+        self.listbox.bind('<Double-1>', lambda event: self.handle_item_click(event))
+        self.return_button = tk.Button(self.root, text='返回上一层', command=self.return_lst)
+        self.return_button.pack(side=tk.TOP)
+        self.create_button = tk.Button(self.root, text='创建目录', command=self.create_new_folder)
+        self.create_button.pack(side=tk.BOTTOM)
+        self.delete_button = tk.Button(self.root, text="Delete", command=self.delete_item)
+        self.delete_button.pack(side=tk.LEFT)
+        self.undo_button = tk.Button(self.root, text="删除回退", command=self.undo_delete)
+        self.undo_button.pack(side=tk.RIGHT)
+        self.root.attributes('-topmost', True)
+        self.root.after(1000, lambda: self.root.attributes('-topmost', False))
         self.root.mainloop()
 
-    def load_books(self):
-        for file_name in os.listdir(self.books_directory):
-            if file_name.lower().endswith(".txt"):
-                book_name = file_name[:-4]
-                self.book_listbox.insert(tk.END, book_name)
-        self.book_listbox.bind("<Double-Button-1>", self.open_selected_book)
+    def handle_single_click(self, event):
+        self.listbox.selection_clear(0, tk.END)
+        self.listbox.selection_set(self.listbox.nearest(event.y))
 
-    def open_selected_book(self,event):
-        selected_book_index=self.book_listbox.curselection()
-        if selected_book_index:
-            selected_book_name=self.book_listbox.get(selected_book_index)
-            read_app=ReaderApp(selected_book_name,path)
-            read_app.root.protocol("WM_DELETE_WINDOW",read_app.on_closing)
-            read_app.run()
+    def update_directory(self, path):
+        self.listbox.delete(0, tk.END)
+        self.cur_path = path
+        try:
+            for entry in os.listdir(path):
+                full_path = os.path.join(path, entry)
+                if os.path.isdir(full_path):
+                    self.listbox.insert(tk.END, f'[DIR] {entry}')
+                elif os.path.isfile(full_path):
+                    self.listbox.insert(tk.END, f'[FILE] {entry}')
+        except PermissionError:
+            messagebox.showerror("Permission Denied", "You do not have permission to access this folder.")
+        except FileNotFoundError:
+            messagebox.showerror("Path Not Found", "The specified path does not exist.")
+
+    def handle_item_click(self, event):
+        selection = self.listbox.curselection()
+        if not selection:
+            return
+
+        selected_item = self.listbox.get(selection[0])
+        item_name = selected_item.split(' ', 1)[1]  # 去除前缀 [DIR] 或 [FILE]
+        item_path = os.path.join(self.cur_path, item_name)
+
+        if os.path.isdir(item_path):
+            self.update_directory(item_path)
+        elif os.path.isfile(item_path):
+            thread=threading.Thread(target=self.open_file,args=(item_path,))
+            thread.start()
+
+    def open_file(self,file_path):
+        file_name=file_path[:file_path.rfind('.')].replace(self.cur_path,'').replace('\\','')
+        bookwin=ReaderApp(file_name,path,file_path)
+
+    def return_lst(self):
+        lst_path = os.path.dirname(os.path.normpath(self.cur_path))
+        if not os.path.commonpath([self.root_path]) == os.path.commonpath([self.root_path, lst_path]):
+            messagebox.showinfo("Info", "已经是最上层路径！")
+            return
+        self.update_directory(lst_path)
+
+    def create_new_folder(self):
+        folder_name = simpledialog.askstring("Create New Folder", "Enter folder name:")
+        if folder_name:
+            new_folder_path = os.path.join(self.cur_path, folder_name)
+            try:
+                os.makedirs(new_folder_path)
+                self.update_directory(self.cur_path)
+            except FileExistsError:
+                messagebox.showerror("Error", "Folder already exists.")
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+
+    def delete_item(self):
+        index = self.listbox.curselection()
+        if index:
+            item = self.listbox.get(index)
+            item_path = os.path.join(self.cur_path, item.split(' ', 1)[1])
+            if messagebox.askyesno("Confirm Delete", f"确认删除'{item}'?"):
+                self.backup_and_record(item_path)
+                try:
+                    if os.path.isdir(item_path):
+                        shutil.rmtree(item_path)
+                    elif os.path.isfile(item_path):
+                        os.remove(item_path)
+                except Exception as e:
+                    messagebox.showerror("Error", str(e))
+                self.update_directory(self.cur_path)
+
+    def backup_and_record(self, item_path):
+        backup_path = os.path.join(self.data_dir, os.path.basename(item_path))
+        if os.path.isdir(item_path):
+            shutil.copytree(item_path, backup_path)
+        elif os.path.isfile(item_path):
+            shutil.copy2(item_path, backup_path)
+
+        record = [time.time(), item_path, backup_path]
+        self.deleted_items.append(record)
+        self.save_records()
+
+    def undo_delete(self):
+        if not self.deleted_items:
+            messagebox.showinfo("Info", "没有可撤销的删除操作。")
+            return
+
+        undo_window = tk.Toplevel(self.root)
+        undo_window.title("选择要恢复的记录")
+        undo_listbox = tk.Listbox(undo_window, width=100, height=10)
+        undo_listbox.pack(padx=10, pady=10)
+
+        # 将记录添加到列表框，包括删除时间和原始路径
+        for record in self.deleted_items:
+            timestamp, item_path, backup_path = record
+            # 将时间戳转换为可读的日期时间字符串
+            deleted_time = datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')
+            # 获取原始路径的相对部分
+            relative_path = os.path.relpath(item_path, self.root_path)
+            # 创建要显示的字符串
+            display_str = f"删除内容：{relative_path}      删除时间：{deleted_time}"
+            undo_listbox.insert(tk.END, display_str)
+
+        def restore_selected():
+            selection = undo_listbox.curselection()
+            if not selection:
+                messagebox.showinfo("Info", "没有选择任何记录。")
+                undo_window.destroy()
+                return
+
+            record = self.deleted_items[selection[0]]
+            original_path, backup_path = record[1], record[2]
+
+            try:
+                if os.path.isdir(backup_path):
+                    shutil.move(backup_path, original_path)
+                elif os.path.isfile(backup_path):
+                    shutil.move(backup_path, original_path)
+                self.deleted_items.pop(selection[0])
+                self.save_records()
+                self.update_directory(self.cur_path)
+            except Exception as e:
+                messagebox.showerror("Error", str(e))
+
+            undo_window.destroy()
+
+        restore_button = tk.Button(undo_window, text="恢复", command=restore_selected)
+        restore_button.pack(side=tk.BOTTOM)
+
+        undo_window.mainloop()
+
+    def save_records(self):
+        with open(self.record_file, 'w') as f:
+            json.dump(self.deleted_items, f)
+
+    def load_records(self):
+        if os.path.exists(self.record_file):
+            with open(self.record_file, 'r') as f:
+                return json.load(f)
+        return []
 
 
 class Novel_Analyse:
@@ -236,13 +419,14 @@ class Novel_Analyse:
 
 
 class ReaderApp:#1*init,32*functional def
-    def __init__(self, filename,path):
+    def __init__(self, filename,path,bookABSpath):
         self.root =tk.Tk()
         self.filename=filename
+        self.bookABSpath=bookABSpath
         self.root.title("阅读窗口")
         try:
             with open(path+'\\'+filename+r'\last_habit.txt','r',encoding='utf-8') as f:
-                self.cur_font,self.cur_size,self.cur_bgcol,self.cur_word_col=eval(f.read())
+                self.cur_font,self.cur_size,self.cur_bgcol,self.cur_word_col,self.pattern=eval(f.read())
         except:
             try:
                 os.makedirs(path+'\\'+filename)
@@ -254,21 +438,24 @@ class ReaderApp:#1*init,32*functional def
             self.cur_word_col = 'black'
         #print(self.cur_bgcol)
         self.stopread=False
-
         self.text = scrolledtext.ScrolledText(self.root, wrap=tk.WORD,
                                               font=(self.cur_font, self.cur_size))
         self.text.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+        if self.bookABSpath.lower().endswith('.txt'):
+            try:
+                with open(self.bookABSpath, 'r', encoding='ANSI') as file:
+                    self.content = file.read()
+                    self.text.insert(tk.END, self.content)
+            except:
+                with open(self.bookABSpath, 'r', encoding='utf-8') as file:
+                    self.content = file.read()
+                    self.text.insert(tk.END, self.content)
+        elif self.bookABSpath.endswith('.ffg'):
+            print('还未开发')#tag
+        else:
+            print('格式暂不支持')
 
-        try:
-            with open(path+'\\books\\'+filename+'.txt', 'r', encoding='ANSI') as file:
-                self.content = file.read()
-                self.text.insert(tk.END, self.content)
-        except:
-            with open(path+'\\books\\'+filename+'.txt', 'r', encoding='utf-8') as file:
-                self.content = file.read()
-                self.text.insert(tk.END, self.content)
         self.load_last_position()
-
         self.menu = tk.Menu(self.root)
         self.root.config(menu=self.menu)
         self.root.bind("<Control-f>", self.open_find_window)
@@ -303,7 +490,6 @@ class ReaderApp:#1*init,32*functional def
         self.read_from_current_position_menu = tk.Menu(self.menu, tearoff=0)
         self.menu.add_command(label="从鼠标位置开始朗读", command=self.start_reading)
         self.menu.add_command(label="终止朗读", command=self.stop_reading)
-
         self.show_chapters = False
         self.show_chapters_button = tk.Button(self.root, text="显示章节", command=self.toggle_chapter_display)
         self.show_chapters_button.pack(side=tk.TOP, fill=tk.X)
@@ -321,7 +507,10 @@ class ReaderApp:#1*init,32*functional def
         self.next_chapter.pack(side=tk.BOTTOM,fill=tk.X)
         self.last_chapter=tk.Button(self.root,text='上一章',command=self.to_last_chapter)
         self.last_chapter.pack(side=tk.BOTTOM, fill=tk.X)
+        self.sort=tk.Button(self.root,text='内容顺序重构',command=self.chapter_sort)
+        self.sort.pack(side=tk.TOP,fill=tk.X)
         self.set_note()
+        self.run()
 
     def analyse_novel(self):
         analyse_window=Novel_Analyse(self)
@@ -500,6 +689,7 @@ class ReaderApp:#1*init,32*functional def
 
     def load_last_position(self):
         try:
+            #print(path)
             with open(path+'\\'+self.filename+'\\'+'last_position.txt', 'r') as f:
                 start = f.read()
             self.text.see(start)
@@ -513,7 +703,7 @@ class ReaderApp:#1*init,32*functional def
 
     def save_last_habit(self):
         with open(path+'\\'+self.filename+'\\'+'last_habit.txt','w',encoding='utf-8') as f:
-            f.write(str([self.cur_font, self.cur_size, self.cur_bgcol, self.cur_word_col]))
+            f.write(str([self.cur_font, self.cur_size, self.cur_bgcol, self.cur_word_col,self.pattern]))
 
     def on_closing(self):
         self.save_last_position()
@@ -548,7 +738,8 @@ class ReaderApp:#1*init,32*functional def
         gaps=[indexs[i]-indexs[i-1] for i in range(1,len(indexs))]
         mean=Mean([indexs[0]]+gaps)
         std=Std(gaps)
-        std_mark=1-std/mean
+        #print(mean,std)
+        std_mark=1.5-std/mean
         if mean<1300:
             mean_mark=mean/1300
         elif mean>1e4:
@@ -561,18 +752,41 @@ class ReaderApp:#1*init,32*functional def
                 extreme_gap_num+=1
         extreme_gap_mark=math.exp(1/(extreme_gap_num/len(chapters)+0.2171472409516259))#(0,100),(1/100,81.6),(1/50,67.8)
         #print(mean_mark,extreme_gap_mark,std_mark)
-        return mean_mark*extreme_gap_mark*std_mark
+        return mean_mark*extreme_gap_mark*(std_mark/abs(std_mark))*abs(std_mark)**0.3
 
+    def lev2_sort(self,patterns):
+        print('进入二级选择...')
+        #print(patterns[0][1])
+        matches=[]
+        for i in patterns:
+            matches.append(re.findall(i[1],self.content))
+        match_lens=[list(map(len,_)) for _ in matches]
+        means=[Mean(_) for _ in match_lens]
+        #print(means)
+        std=[Std(_) for _ in match_lens]
+        ma=[max(_) for _ in match_lens]
+        mi=[min(_) for _ in match_lens]
+        strange_len=[1 for _ in match_lens]
+        print(means,std,ma,mi,strange_len)
+        for i in range(len(match_lens)):
+            for j in match_lens[i]:
+                if match_lens[i][j]-means[i]>10*std[i] or means[i]-match_lens[i][j]>5*std[i]:
+                    strange_len[i]+=1
+        lv2_marks=[(means[_]**2*(max(ma)+min(ma)-ma[_])*mi[_]*(max(strange_len)+min(strange_len)-strange_len[_]),patterns[_][1]) for _ in range(len(match_lens))]
+        lv2_marks.sort(key=lambda x:x[0])
+        for i in lv2_marks:
+            print(i[1],'二级得分:',i[0])
+        return lv2_marks[-1][1]
     def pattern_auto_select(self):
         print('自动选择正则表达式中...')
-        patterns = [r'第\d*章.*\n', r'第.*章\s.*\n', r'===(.*)===', r'第.*章.*\n', r'Chapter.*\n', r'CHAPTER.*\n',
+        patterns = [r'第\d*章.*\n', r'第.*章\s.*\n', r'===(.*)===', r'Chapter.*\n', r'CHAPTER.*\n',
                     r'\d+.{0,15}\n', r'\d+\n',
                     r'第[〇一二三四五六七八九十百千万零壹贰叁肆伍陆柒捌玖拾佰仟萬億兆参拾零` ]+回\s.*\n',r'第.+回\s.+\n',
             r'(第.*回\s.+\s.+)\s',r'[ \t]+第.+章[ \t].+[ \t]+',r'\d+、.*\n',r'([A-Z]+\s-\s.*?)\n']
         name_marks=[]
         gap_marks=[]
         for pattern in patterns:
-            #print(pattern)
+            #print(pattern,'gap')
             cur_pattern_chapters=re.findall(pattern,self.content)
             name_marks.append(self.mark_chapter_names(cur_pattern_chapters))
             gap_marks.append(self.mark_chapter_gaps(cur_pattern_chapters))
@@ -585,8 +799,18 @@ class ReaderApp:#1*init,32*functional def
         # for i in range(len(marks)):
         #    print(marks[i][1],':',marks[i][0])
         marks.sort(key=lambda x:x[0],reverse=1)
-        print('已为您选择最合适的正则表达式：“',marks[0][1],'”','(Relative Preferance:',marks[0][0]*100,'%)',sep='')
-        return marks[0][1]
+        #2024.12.6,added lev 2 sort, to discriminate similarly matched patterns
+        lev2s=[]
+        print('筛选出候选正则表达式：')
+        for i in range(len(marks)):
+            if marks[i][0]>=marks[0][0]*0.7:
+                lev2s.append((marks[i][0],marks[i][1]))
+                #print(marks[i][1],lev2s[-1][1])
+                print(marks[i][1],'\t(Relative Preferance:',marks[i][0]*100,'%)',sep='')
+        final=self.lev2_sort(lev2s)
+        print('已为您选择最合适的正则表达式：“',final)
+        #return r'第\d*章.*\n'
+        return final
 
     def create_chapter_menu(self):
         try:
@@ -595,6 +819,8 @@ class ReaderApp:#1*init,32*functional def
         except:
             print('首次阅读',self.filename,'，预处理中...',sep='')
             pattern=self.pattern_auto_select()
+            self.pattern=pattern
+            #print(pattern)
             self.chapters = re.findall(pattern, self.content)
             with open(path+'\\'+self.filename+'\\'+'chapter','wb') as f:
                 pickle.dump(self.chapters,f)
@@ -612,6 +838,42 @@ class ReaderApp:#1*init,32*functional def
 
         self.chapter_listbox.bind('<<ListboxSelect>>', self.on_chapter_select)
         self.hide_chapters()
+
+    def chapter_sort(self):#currently only support pattern:'第\d*章.*\n'
+        suppport_lst=[r'第\d*章.*\n',r'第.*章\s.*\n',r'\d+.{0,15}\n']
+        try:
+            self.pattern
+        except:
+            print('未记录书本对应的正则表达式，重新选择中...')
+            self.pattern=self.pattern_auto_select()
+        print(self.pattern)
+        if not self.pattern in suppport_lst:
+            print('抱歉，该书章节模式暂不支持，相关功能开发中...')
+            return
+        matches=re.findall(self.pattern,self.content)
+        if self.pattern==r'第\d*章.*\n':
+            nums=[int(re.findall(r'第(\d*?)章.*\n',_)[0]) for _ in matches]
+        if self.pattern==r'第.*章\s.*\n':
+            nums = [int(re.findall(r'第(.*?)章\s.*\n', _)[0]) for _ in matches]
+        if self.pattern==r'\d+.{0,15}\n':
+            nums = [int(re.findall(r'(\d+).{0,15}\n', _)[0]) for _ in matches]
+        last=0
+        idxs=[]
+        for i in matches:
+            idxs.append(self.content.find(i,last))
+            last=idxs[-1]
+        chapter_segments = [[[0, idxs[0]], -1]]
+        for i in range(len(matches)-1):
+            chapter_segments.append([[idxs[i],idxs[i+1]],nums[i]])
+        chapter_segments.append([[idxs[-1],len(self.content)],len(nums)+10])
+        new_content=''
+        #print(chapter_segments)
+        chapter_segments.sort(key=lambda x:x[1])
+        for i in chapter_segments:
+            new_content=new_content+self.content[i[0][0]:i[0][1]]
+        with open(self.filename+'(chapter sorted).txt','w',encoding='utf-8') as f:
+            f.write(new_content)
+        print('按章节排序完成，排序后的内容已存储到'+self.filename+'中。')
 
     def toggle_chapter_display(self):
         if self.show_chapters:
@@ -1018,7 +1280,7 @@ class Novel2Speech:
             os.makedirs('cache')
         is_first=1
         while self.cache_index<len(self.splited_indexs) and not self.bookApp.stopread:
-            #print(self.cache_index,self.bookApp.stopread)
+            print(self.cache_index,self.bookApp.stopread)
             text = self.bookApp.content[self.splited_indexs[self.cache_index][0]
                                         :self.splited_indexs[self.cache_index][1] + 1]
             while not self.have_character(text) and self.cache_index<len(self.splited_indexs):
@@ -1178,9 +1440,84 @@ def is_chinese_in_total(str):
     else:
         return 0
 
+def choose_directory():
+    root = tk.Tk()
+    #root.withdraw()
+    folder_path = filedialog.askdirectory()
+    root.destroy()
+    if folder_path:
+        return folder_path
+    else:
+        return None
+
+def is_int_by(x:str,l=0,r=(2**31)-1):#[l,r]
+    try:
+        x=int(x)
+        if l<=x<=r:
+            return 1
+        else:
+            return 0
+    except:
+        return 0
+
+def show_temporary_message(root, message, duration=1000):
+    # 创建一个顶级窗口用于显示消息
+    temp_window = tk.Toplevel(root)
+    #temp_window.overrideredirect(True)  # 隐藏窗口边框
+    temp_window.attributes('-topmost', True)  # 确保窗口在最前面
+
+    # 创建一个标签来显示消息
+    message_label = tk.Label(temp_window, text=message, font=('Helvetica', 12))
+    message_label.pack(padx=3, pady=3)
+
+    # 更新窗口以获取正确的尺寸信息
+    temp_window.update_idletasks()
+
+    # 设置窗口的位置，使其位于root窗口的中心
+    window_width = temp_window.winfo_width()
+    window_height = temp_window.winfo_height()
+    root_x = root.winfo_rootx()
+    root_y = root.winfo_rooty()
+    root_width = root.winfo_width()
+    root_height = root.winfo_height()
+    x_position = int(root_x + (root_width / 2) - (window_width / 2))
+    y_position = int(root_y + (root_height / 2) - (window_height / 2))
+    temp_window.geometry(f'+{x_position}+{y_position}')
+
+    # 在指定时间后关闭窗口
+    temp_window.after(duration, temp_window.destroy)
+
+try:
+    with open('paths','rb') as f:
+        paths=pickle.load(f)
+except:
+    paths=[]
+a=-1
+if paths:
+    for i in range(len(paths)):
+        paths[i]=os.path.normpath(paths[i])
+    print('历史路径：')
+    for i in range(len(paths)):
+        print(i,':"',paths[i],'"',sep='')
+    print(i+1,':选择新路径',sep='')
+    a=input()
+    while not is_int_by(a,0,i+1):
+        print('Invalid input!')
+        a=input()
+    a=int(a)
+    if a<i+1:
+        path=paths[a]
+if a==-1 or a==len(paths):
+    path =os.path.normpath(choose_directory())
+    if not path in paths:
+        if not os.path.exists(path+'\\'+'books'):
+            os.makedirs(path+'\\'+'books')
+        paths.append(path)
+    with open('paths', 'wb') as f:
+        pickle.dump(paths,f)
 
 
-path=r'D:\大学\门前雪\小说记录\PythonReadBook\bookfiles'
-show=BookSelectionWindow(path)
-show.run()
+
+show=FolderSelect(path)#default:D:\大学\门前雪\小说记录\PythonReadBook\bookfiles
+
 

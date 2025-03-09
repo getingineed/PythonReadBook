@@ -7,9 +7,9 @@ def handle_client(client_socket):
 
     request = client_socket.recv(4096)
     print(f"Received request:\n{request.decode()}")
-
     proxy_host, proxy_port = '127.0.0.1', 7890
     server_socket=socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #sock.setsockopt(socket.SOL_SOCKET, 25, str( + '\0').encode('utf-8'))
     server_socket.connect((proxy_host, proxy_port))
     server_socket.send(request)
 
@@ -42,7 +42,7 @@ def start_proxy():
     while True:
         client_socket, address = proxy_socket.accept()
         print(f"Received connection from {address}")
-        client_handler = threading.Thread(target=handle_client, args=(client_socket))
+        client_handler = threading.Thread(target=handle_client, args=(client_socket,))
         client_handler.start()
 
 start_proxy()
